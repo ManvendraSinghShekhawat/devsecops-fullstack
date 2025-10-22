@@ -1,1 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-green
+  labels:
+    app: frontend
+    version: green
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+      version: green
+  template:
+    metadata:
+      labels:
+        app: frontend
+        version: green
+    spec:
+      containers:
+      - name: frontend
+        image: ghcr.io/<YOUR_GH_USER>/devsecops-fullstack-frontend:green
+        env:
+          - name: API_URL
+            value: "http://api:5000"
+        ports:
+        - containerPort: 80
 
