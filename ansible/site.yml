@@ -1,1 +1,30 @@
 
+- hosts: k3s
+  become: true
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Docker using convenience script
+      shell: curl -fsSL https://get.docker.com | sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: Install k3s server
+      shell: curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for k3s node to be Ready
+      shell: kubectl get nodes
+      retries: 10
+      delay: 6
+      register: k3s_nodes
+      until: "'Ready' in k3s_nodes.stdout"
+
+    - name: Fetch kubeconfig
+      fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: ./kubeconfig
+        flat: yes
