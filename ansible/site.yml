@@ -1,29 +1,66 @@
 - hosts: k3s
   become: true
+  vars:
+    k3s_version: "stable"
   tasks:
     - name: Update apt cache
       apt:
         update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install prerequisites
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
 
     - name: Install Docker using convenience script
-      shell: curl -fsSL https://get.docker.com | sh
+      shell: |
+        curl -fsSL https://get.docker.com | sh
       args:
         creates: /usr/bin/docker
 
-    - name: Install k3s server
-      shell: curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
+    - name: Add ubuntu to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+      ignore_errors: yes
+
+    - name: Install k3s server (single-node)
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh -
       args:
         creates: /usr/local/bin/k3s
 
-    - name: Wait for k3s node to be Ready
+    - name: Wait for kube-apiserver to be reachable
       shell: kubectl get nodes
+      register: k3s_nodes
       retries: 10
       delay: 6
-      register: k3s_nodes
       until: "'Ready' in k3s_nodes.stdout"
 
-    - name: Fetch kubeconfig
+    - name: Fetch kubeconfig to local control host
       fetch:
         src: /etc/rancher/k3s/k3s.yaml
         dest: ./kubeconfig
         flat: yes
+
+    - name: Create deploy directory on remote
+      file:
+        path: /home/ubuntu/deploy/k8s
+        state: directory
+        owner: ubuntu
+        mode: 0755
+
+    - name: Copy k8s manifests to remote deploy directory
+      copy:
+        src: ../k8s/
+        dest: /home/ubuntu/deploy/k8s/
+        owner: ubuntu
+        mode: 0644
