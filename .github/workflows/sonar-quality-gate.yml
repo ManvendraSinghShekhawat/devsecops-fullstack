@@ -1,1 +1,28 @@
 
+name: SonarCloud scan
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java (required by Sonar scanner)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+      - name: SonarCloud Scan
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          curl -sSLo sonarscanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
+          unzip -q sonarscanner.zip
+          export PATH=$PWD/sonar-scanner-4.8.0.2856-linux/bin:$PATH
+          sonar-scanner \
+            -Dsonar.projectKey=${{ github.repository }} \
+            -Dsonar.organization=<your-sonar-org> \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.login=$SONAR_TOKEN
