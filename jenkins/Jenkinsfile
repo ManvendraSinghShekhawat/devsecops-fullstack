@@ -1,1 +1,60 @@
+pipeline {
+  agent any
+  environment {
+    GHCR = "ghcr.io/<YOUR_GH_USER>"
+  }
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+    stage('Build API Docker') {
+      steps {
+        sh 'docker build -t $GHCR/devsecops-fullstack-api:latest services/api'
+      }
+    }
+    stage('Build Frontend Docker (blue)') {
+      steps {
+        sh 'docker build -t $GHCR/devsecops-fullstack-frontend:blue services/frontend'
+      }
+    }
+    stage('Build Frontend Docker (green)') {
+      steps {
+        sh 'docker build -t $GHCR/devsecops-fullstack-frontend:green services/frontend'
+      }
+    }
+    stage('SonarQube analysis') {
+      steps {
+        echo 'Run SonarQube analysis here (configure Sonar and credentials in Jenkins)'
+      }
+    }
+    stage('Push images') {
+      steps {
+        withCredentials([string(credentialsId: 'GHCR_TOKEN', variable: 'GHCR_TOKEN')]) {
+          sh '''
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u $GHCR_USER --password-stdin
+            docker push $GHCR/devsecops-fullstack-api:latest
+            docker push $GHCR/devsecops-fullstack-frontend:blue
+            docker push $GHCR/devsecops-fullstack-frontend:green
+          '''
+        }
+      }
+    }
+    stage('Blue-Green Deploy (switch to green)') {
+      steps {
+        // This is a simple example that applies green deployment manifests and switches service selector
+        sh 'kubectl apply -f k8s/blue-green/frontend-green.yaml'
+        sh 'kubectl apply -f k8s/base/frontend-deployment.yaml' // ensure base exists
+        // Patch service to route to green
+        sh 'kubectl patch svc frontend -p "{\"spec\":{\"selector\":{\"app\":\"frontend\",\"version\":\"green\"}}}" || true'
+      }
+    }
+  }
+  post {
+    always {
+      echo "Pipeline finished"
+    }
+  }
+}
 
