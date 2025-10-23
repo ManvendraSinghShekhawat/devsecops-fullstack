@@ -1,33 +1,57 @@
-# Basic infrastructure for single-node k3s + services
-locals {
-  name = "${var.project_name}"
-}
-
+####################
+# Networking layer #
+####################
 resource "aws_vpc" "main" {
-  cidr_block = "10.0.0.0/16"
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
   tags = {
-    Name = "${local.name}-vpc"
+    Name = "${var.project_name}-vpc"
   }
 }
 
-data "aws_availability_zones" "azs" {}
-
-resource "aws_subnet" "public" {
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = data.aws_availability_zones.azs.names[0]
+resource "aws_subnet" "public_a" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "${var.aws_region}a"
+  map_public_ip_on_launch = true
   tags = {
-    Name = "${local.name}-subnet"
+    Name = "${var.project_name}-public-a"
   }
 }
 
-resource "aws_security_group" "k3s_sg" {
-  name        = "${local.name}-sg"
-  description = "Allow SSH from your IP, HTTP and NodePort"
+resource "aws_internet_gateway" "gw" {
+  vpc_id = aws_vpc.main.id
+  tags = {
+    Name = "${var.project_name}-igw"
+  }
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.gw.id
+  }
+  tags = {
+    Name = "${var.project_name}-public-rt"
+  }
+}
+
+resource "aws_route_table_association" "public_a" {
+  subnet_id      = aws_subnet.public_a.id
+  route_table_id = aws_route_table.public.id
+}
+
+####################
+# Security group   #
+####################
+resource "aws_security_group" "eks_sg" {
+  name        = "${var.project_name}-eks-sg"
+  description = "Allow SSH and web traffic"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "SSH from your IP"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -35,24 +59,13 @@ resource "aws_security_group" "k3s_sg" {
   }
 
   ingress {
-    description = "HTTP"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # NodePort example (frontend nodePort 30080). Add specific ports only to limit exposure.
-  ingress {
-    description = "Frontend NodePort example 30080"
-    from_port   = 30080
-    to_port     = 30080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   egress {
-    description = "Allow all outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -60,45 +73,36 @@ resource "aws_security_group" "k3s_sg" {
   }
 
   tags = {
-    Name = "${local.name}-sg"
+    Name = "${var.project_name}-sg"
   }
 }
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+####################
+# ECR repository   #
+####################
+resource "aws_ecr_repository" "app_repo" {
+  name                 = "${var.project_name}-repo"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
   }
-}
-
-resource "aws_key_pair" "deployer" {
-  key_name   = "${local.name}-key"
-  public_key = file(var.ssh_public_key_path)
-}
-
-resource "aws_instance" "k3s_node" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
-  subnet_id              = aws_subnet.public.id
-  vpc_security_group_ids = [aws_security_group.k3s_sg.id]
-  key_name               = aws_key_pair.deployer.key_name
 
   tags = {
-    Name = "${local.name}-k3snode"
+    Name = "${var.project_name}-ecr"
   }
+}
 
-  provisioner "remote-exec" {
-    inline = [
-      "echo 'Instance ready. You can provision with Ansible from your control machine.'"
-    ]
-
-    connection {
-      type        = "ssh"
-      user        = "ubuntu"
-      private_key = file(regex("^~/(.*)$", pathexpand(var.ssh_public_key_path) ) == "" ? "" : pathexpand(replace(var.ssh_public_key_path, ".pub$", "")))
-      host        = self.public_ip
-    }
+####################
+# ECS cluster      #
+####################
+resource "aws_ecs_cluster" "main" {
+  name = "${var.project_name}-ecs"
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+  tags = {
+    Name = "${var.project_name}-ecs"
   }
 }
